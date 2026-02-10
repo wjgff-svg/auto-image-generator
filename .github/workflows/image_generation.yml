@@ -1,0 +1,33 @@
+name: 画像生成自動実行
+
+on:
+  schedule:
+    # 1日3回実行（日本時間 9:00, 17:00, 1:00）
+    - cron: '20 0,8,16 * * *'
+  workflow_dispatch:  # 手動実行も可能
+
+jobs:
+  generate-image:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: リポジトリをチェックアウト
+      uses: actions/checkout@v3
+    
+    - name: Python環境のセットアップ
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: 必要なライブラリをインストール
+      run: |
+        pip install pillow boto3
+    
+    - name: 画像を生成してアップロード
+      env:
+        R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+        R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      run: |
+        python scripts/generate_image.py
