@@ -1,4 +1,4 @@
-name: 画像生成自動実行
+name: AI実写風画像生成（Hugging Face使用）
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  generate-image:
+  generate-ai-image:
     runs-on: ubuntu-latest
     
     steps:
@@ -20,10 +20,11 @@ jobs:
     
     - name: 必要なライブラリをインストール
       run: |
-        pip install pillow boto3
+        pip install pillow boto3 requests
     
-    - name: 画像を生成してアップロード
+    - name: AI画像を生成してアップロード
       env:
+        HUGGINGFACE_API_TOKEN: ${{ secrets.HUGGINGFACE_API_TOKEN }}
         R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
         R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
         R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
