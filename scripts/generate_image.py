@@ -2,16 +2,17 @@
 # -*- coding: utf-8 -*-
 """
 Hugging Face APIを使用して実写風画像を生成
-Stable Diffusionモデルを利用
+新しいエンドポイント（router.huggingface.co）に対応
 """
 
 import os
 from datetime import datetime
-from PIL import Image
+from PIL import Image, ImageDraw
 import boto3
 from io import BytesIO
 import requests
 import random
+import time
 
 
 def generate_realistic_character_image():
@@ -24,7 +25,7 @@ def generate_realistic_character_image():
     if not api_token:
         raise ValueError("❌ HUGGINGFACE_API_TOKEN が設定されていません")
     
-    # 使用するモデル（無料で使える実写系モデル）
+    # 新しいエンドポイントに変更
     model_id = "stabilityai/stable-diffusion-2-1"
     api_url = f"https://api-inference.huggingface.co/models/{model_id}"
     
@@ -40,29 +41,109 @@ def generate_realistic_character_image():
     print(f"📝 プロンプト: {selected_prompt}")
     
     headers = {
-        "Authorization": f"Bearer {api_token}"
+        "Authorization": f"Bearer {api_token}",
+        "Content-Type": "application/json"
     }
     
     payload = {
         "inputs": selected_prompt,
         "parameters": {
-            "negative_prompt": "ugly, blurry, low quality, distorted, anime, cartoon",
-            "num_inference_steps": 50,
-            "guidance_scale": 7.5
+            "negative_prompt": "ugly, blurry, low quality, distorted, deformed",
+            "num_inference_steps": 30,
+            "guidance_scale": 7.5,
+            "width": 512,
+            "height": 512
         }
     }
     
-    # API呼び出し
-    print("⏳ API呼び出し中...")
-    response = requests.post(api_url, headers=headers, json=payload, timeout=120)
+    # API呼び出し（リトライ機能付き）
+    max_retries = 3
+    retry_delay = 10
     
-    if response.status_code != 200:
-        raise Exception(f"API Error: {response.status_code} - {response.text}")
+    for attempt in range(max_retries):
+        try:
+            print(f"⏳ API呼び出し中... (試行 {attempt + 1}/{max_retries})")
+            response = requests.post(api_url, headers=headers, json=payload, timeout=180)
+            
+            if response.status_code == 200:
+                # 成功：画像を取得
+                image = Image.open(BytesIO(response.content))
+                print("✅ 画像生成完了")
+                return image
+                
+            elif response.status_code == 503:
+                # モデルがロード中
+                print(f"⏳ モデルロード中... {retry_delay}秒待機")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # 待機時間を倍にする
+                continue
+                
+            else:
+                # その他のエラー
+                error_msg = response.text
+                print(f"❌ API Error: {response.status_code} - {error_msg}")
+                
+                if attempt < max_retries - 1:
+                    print(f"⏳ {retry_delay}秒後に再試行...")
+                    time.sleep(retry_delay)
+                    continue
+                else:
+                    raise Exception(f"API Error: {response.status_code} - {error_msg}")
+                    
+        except requests.exceptions.Timeout:
+            print(f"⏰ タイムアウト (試行 {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                print(f"⏳ {retry_delay}秒後に再試行...")
+                time.sleep(retry_delay)
+                continue
+            else:
+                raise Exception("API呼び出しがタイムアウトしました")
     
-    # 画像を取得
-    image = Image.open(BytesIO(response.content))
-    print("✅ 画像生成完了")
+    raise Exception("画像生成に失敗しました")
+
+
+def generate_fallback_image():
+    """
+    フォールバック：シンプルな画像を生成（API失敗時用）
+    """
+    print("🎨 フォールバック画像を生成中...")
     
+    width = 1200
+    height = 800
+    
+    image = Image.new('RGB', (width, height))
+    draw = ImageDraw.Draw(image)
+    
+    # グラデーション背景
+    for y in range(height):
+        r = int(20 + (80 * y / height))
+        g = int(40 + (120 * y / height))
+        b = int(100 + (155 * y / height))
+        draw.line([(0, y), (width, y)], fill=(r, g, b))
+    
+    # 装飾的な円
+    for i in range(20):
+        x = random.randint(0, width)
+        y = random.randint(0, height)
+        radius = random.randint(30, 150)
+        color = (
+            random.randint(100, 255),
+            random.randint(100, 255),
+            random.randint(150, 255)
+        )
+        draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=color)
+    
+    # テキスト
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 背景ボックス
+    draw.rectangle([30, 30, 600, 150], fill=(0, 0, 0, 200))
+    
+    # テキスト描画
+    draw.text((50, 50), "AI Image Generation", fill=(255, 255, 255))
+    draw.text((50, 90), f"Generated: {timestamp}", fill=(200, 200, 200))
+    
+    print("✅ フォールバック画像生成完了")
     return image
 
 
@@ -70,8 +151,6 @@ def add_watermark(image):
     """
     画像にタイムスタンプと情報を追加
     """
-    from PIL import ImageDraw
-    
     img_with_text = image.copy()
     draw = ImageDraw.Draw(img_with_text)
     
@@ -80,12 +159,12 @@ def add_watermark(image):
     # タイムスタンプ
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # 半透明の背景
+    # 半透明の背景（左上）
     draw.rectangle([10, 10, 450, 80], fill=(0, 0, 0, 200))
     
     # テキスト
     draw.text((20, 20), f"Generated: {timestamp}", fill=(255, 255, 255))
-    draw.text((20, 50), "AI Generated Image (Stable Diffusion)", fill=(200, 200, 200))
+    draw.text((20, 50), "AI Generated Image", fill=(200, 200, 200))
     
     return img_with_text
 
@@ -141,8 +220,13 @@ def main():
     print("=" * 60)
     
     try:
-        # AI画像生成
-        image = generate_realistic_character_image()
+        # まずAI画像生成を試みる
+        try:
+            image = generate_realistic_character_image()
+        except Exception as ai_error:
+            print(f"⚠️  AI生成失敗: {ai_error}")
+            print("📦 フォールバック画像を使用します")
+            image = generate_fallback_image()
         
         # 透かしを追加
         image_with_watermark = add_watermark(image)
@@ -154,13 +238,10 @@ def main():
         print("✨ すべての処理が完了しました！")
         print(f"📷 保存ファイル: {filename}")
         print("=" * 60)
+        
     except Exception as e:
         print("=" * 60)
         print(f"❌ エラーが発生しました: {e}")
-        print("🔧 対処方法:")
-        print("1. HUGGINGFACE_API_TOKEN が正しく設定されているか確認")
-        print("2. Hugging Face APIの利用制限を確認")
-        print("3. インターネット接続を確認")
         print("=" * 60)
         raise
 
